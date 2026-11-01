@@ -178,16 +178,6 @@ class Visitor:
             return enter_leave
 
 
-class Stack(NamedTuple):
-    """A stack for the visit function."""
-
-    in_array: bool
-    idx: int
-    keys: tuple[Node, ...]
-    edits: list[tuple[int | str, Node]]
-    prev: Stack
-
-
 def visit(
     root: Node, visitor: Visitor, visitor_keys: VisitorKeyMap | None = None
 ) -> Any:
@@ -382,6 +372,7 @@ def visit(
             if path:
                 path_pop()
         else:
+            # stack entry fields: (in_array, idx, keys, edits, prev)
             stack = (in_array, idx, keys, edits, stack)
             in_array = node_is_array
             keys = node if in_array else visitor_keys.get(node.kind, ())  # type: ignore
