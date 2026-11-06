@@ -62,6 +62,7 @@ from ..type import (
     GraphQLFieldResolver,
     GraphQLLeafType,
     GraphQLList,
+    GraphQLNonNull,
     GraphQLObjectType,
     GraphQLOutputType,
     GraphQLResolveInfo,
@@ -70,9 +71,6 @@ from ..type import (
     GraphQLStreamDirective,
     GraphQLTypeResolver,
     assert_valid_schema,
-    is_abstract_type,
-    is_leaf_type,
-    is_list_type,
     is_non_null_type,
     is_object_type,
 )
@@ -1116,7 +1114,7 @@ class Executor(Generic[TContext]):
 
         # If field type is NonNull, complete for inner type, and throw field error if
         # result is null.
-        if is_non_null_type(return_type):
+        if isinstance(return_type, GraphQLNonNull):
             completed = self.complete_value(
                 return_type.of_type,
                 field_details_list,
@@ -1137,8 +1135,13 @@ class Executor(Generic[TContext]):
         if result is None or result is Undefined:
             return None
 
+        # If field type is a leaf type, Scalar or Enum, coerce to a valid value,
+        # returning null if coercion is not possible.
+        if isinstance(return_type, GraphQLLeafType):
+            return self.complete_leaf_value(return_type, result)
+
         # If field type is List, complete each item in the list with inner type
-        if is_list_type(return_type):
+        if isinstance(return_type, GraphQLList):
             return self.complete_list_value(
                 return_type,
                 field_details_list,
@@ -1148,15 +1151,9 @@ class Executor(Generic[TContext]):
                 position_context,
             )
 
-        # If field type is a leaf type, Scalar or Enum, coerce to a valid value,
-        # returning null if coercion is not possible.
-        if is_leaf_type(return_type):
-            return self.complete_leaf_value(return_type, result)
-
-        # If field type is an abstract type, Interface or Union, determine the runtime
-        # Object type and complete for that type.
-        if is_abstract_type(return_type):
-            return self.complete_abstract_value(
+        # If field type is Object, execute and complete all sub-selections.
+        if isinstance(return_type, GraphQLObjectType):
+            return self.complete_object_value(
                 return_type,
                 field_details_list,
                 info,
@@ -1165,9 +1162,10 @@ class Executor(Generic[TContext]):
                 position_context,
             )
 
-        # If field type is Object, execute and complete all sub-selections.
-        if is_object_type(return_type):
-            return self.complete_object_value(
+        # If field type is an abstract type, Interface or Union, determine the runtime
+        # Object type and complete for that type.
+        if isinstance(return_type, GraphQLAbstractType):
+            return self.complete_abstract_value(
                 return_type,
                 field_details_list,
                 info,
@@ -1724,6 +1722,7 @@ class Executor(Generic[TContext]):
         stream_usage = self.get_stream_usage(field_details_list, path)
         iterator = iter(items)
         index = 0
+        add_key = path.add_key
         try:
             while True:
                 if (
@@ -1748,7 +1747,7 @@ class Executor(Generic[TContext]):
 
                 # No need to modify the info object containing the path,
                 # since from here on it is not ever accessed by resolver functions.
-                item_path = path.add_key(index, None)
+                item_path = add_key(index, None)
 
                 if is_awaitable(item):
                     append_completed(
@@ -1835,11 +1834,17 @@ class Executor(Generic[TContext]):
 
             if is_awaitable(completed_item):
 
-                async def await_completed() -> Any:
+                async def await_completed(
+                    executor: Executor[TContext],
+                    completed_item: Awaitable[Any],
+                    item_type: GraphQLOutputType,
+                    field_details_list: FieldDetailsList,
+                    item_path: Path,
+                ) -> Any:
                     try:
                         return await completed_item
                     except Exception as raw_error:
-                        self.handle_field_error(
+                        executor.handle_field_error(
                             raw_error,
                             item_type,
                             field_details_list,
@@ -1847,7 +1852,11 @@ class Executor(Generic[TContext]):
                         )
                         return None
 
-                complete_results.append(await_completed())
+                complete_results.append(
+                    await_completed(
+                        self, completed_item, item_type, field_details_list, item_path
+                    )
+                )
                 return True
 
             complete_results.append(completed_item)
