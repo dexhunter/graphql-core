@@ -868,29 +868,29 @@ class Executor(Generic[TContext]):
         """
         results: dict[str, Any] = {}
         is_awaitable = self.is_awaitable
-        awaitable_fields: list[str] = []
-        append_awaitable = awaitable_fields.append
+        awaitable_fields: dict[str, Awaitable[Any]] | None = None
+        new_path = tuple.__new__
         try:
             for response_name, field_details_list in grouped_field_set.items():
-                field_path = Path(path, response_name, parent_type.name)
                 result = self.execute_field(
                     parent_type,
                     source_value,
                     field_details_list,
-                    field_path,
+                    new_path(Path, (path, response_name, parent_type.name)),
                     position_context,
                 )
                 if result is not Undefined:
                     results[response_name] = result
                     if is_awaitable(result):
-                        append_awaitable(response_name)
+                        if awaitable_fields is None:
+                            awaitable_fields = {response_name: result}
+                        else:
+                            awaitable_fields[response_name] = result
         except Exception:
             if awaitable_fields:
                 # Ensure that awaitables created by other fields are settled,
                 # as they may also fail.
-                self.settle_in_background(
-                    [results[field] for field in awaitable_fields]
-                )
+                self.settle_in_background(list(awaitable_fields.values()))
             raise
 
         # If there are no coroutines, we can just return the object.
@@ -901,20 +901,26 @@ class Executor(Generic[TContext]):
         # field, which is possibly a coroutine object. Return a coroutine object that
         # will yield this same map, but with any coroutines awaited in parallel and
         # replaced with the values they yielded.
-        async def get_results() -> dict[str, Any]:
-            if len(awaitable_fields) == 1:
-                # If there is only one field, avoid the overhead of parallelization.
-                field = awaitable_fields[0]
-                results[field] = await results[field]
-            else:
-                awaited_results = await gather_with_cancel(
-                    *(results[field] for field in awaitable_fields)
-                )
-                results.update(zip(awaitable_fields, awaited_results, strict=True))
+        if len(awaitable_fields) == 1:
+
+            async def get_result(
+                results: dict[str, Any], response_name: str, result: Awaitable[Any]
+            ) -> dict[str, Any]:
+                results[response_name] = await result
+                return results
+
+            response_name, result = awaitable_fields.popitem()
+            return get_result(results, response_name, result)
+
+        async def get_results(
+            results: dict[str, Any], awaitable_fields: dict[str, Awaitable[Any]]
+        ) -> dict[str, Any]:
+            awaited_results = await gather_with_cancel(*awaitable_fields.values())
+            results.update(zip(awaitable_fields, awaited_results, strict=True))
 
             return results
 
-        return get_results()
+        return get_results(results, awaitable_fields)
 
     def execute_field(
         self,
