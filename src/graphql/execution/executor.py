@@ -22,6 +22,7 @@ from collections.abc import (
 )
 from contextlib import suppress
 from copy import copy
+from itertools import count
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -1576,16 +1577,17 @@ class Executor(Generic[TContext]):
         awaitable_indices: list[int] = []
         append_awaitable = awaitable_indices.append
         stream_usage = self.get_stream_usage(field_details_list, path)
+        # Without @stream, use -1 so that the loop only compares integers.
+        stream_count = -1 if stream_usage is None else stream_usage.initial_count
         try:
             early_return = async_iterator.aclose  # type: ignore[attr-defined]
         except AttributeError:
             early_return = None
-        index = 0
         try:
-            while True:
+            for index in count():
                 if (
-                    stream_usage
-                    and index == stream_usage.initial_count
+                    index == stream_count
+                    and stream_usage is not None
                     and self.handle_stream(
                         index,
                         path,
@@ -1598,7 +1600,6 @@ class Executor(Generic[TContext]):
                 ):
                     break
 
-                item_path = path.add_key(index, None)
                 try:
                     item = await anext(async_iterator)
                 except StopAsyncIteration:
@@ -1607,6 +1608,9 @@ class Executor(Generic[TContext]):
                     raise located_error(
                         raw_error, to_nodes(field_details_list), path.as_list()
                     ) from raw_error
+
+                # Build the item path directly to skip the add_key call.
+                item_path = Path(path, index, None)
 
                 if is_awaitable(item):
                     append_completed(
@@ -1631,8 +1635,6 @@ class Executor(Generic[TContext]):
                     position_context,
                 ):
                     append_awaitable(index)
-
-                index += 1
         except Exception:
             if early_return is not None:  # pragma: no branch
                 with suppress_exceptions:
@@ -1830,8 +1832,6 @@ class Executor(Generic[TContext]):
 
         :meta private:
         """
-        is_awaitable = self.is_awaitable
-
         try:
             completed_item = self.complete_value(
                 item_type,
@@ -1842,13 +1842,20 @@ class Executor(Generic[TContext]):
                 position_context,
             )
 
-            if is_awaitable(completed_item):
-
-                async def await_completed() -> Any:
+            if self.is_awaitable(completed_item):
+                # Pass the values explicitly, so that synchronous items
+                # do not pay for allocating closure cells.
+                async def await_completed(
+                    executor: Executor,
+                    completed_item: Awaitable[Any],
+                    item_type: GraphQLOutputType,
+                    field_details_list: FieldDetailsList,
+                    item_path: Path,
+                ) -> Any:
                     try:
                         return await completed_item
                     except Exception as raw_error:
-                        self.handle_field_error(
+                        executor.handle_field_error(
                             raw_error,
                             item_type,
                             field_details_list,
@@ -1856,7 +1863,11 @@ class Executor(Generic[TContext]):
                         )
                         return None
 
-                complete_results.append(await_completed())
+                complete_results.append(
+                    await_completed(
+                        self, completed_item, item_type, field_details_list, item_path
+                    )
+                )
                 return True
 
             complete_results.append(completed_item)
