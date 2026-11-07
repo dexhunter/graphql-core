@@ -1,0 +1,52 @@
+{
+  "targets": [
+    {
+      "upstream_repo": "graphql-python/graphql-core",
+      "head_sha": "1d505c19bf5fb8da0205165b78af6094d637009e",
+      "file": "src/graphql/pyutils/suggestion_list.py",
+      "function": "LexicalDistance.measure",
+      "native_test_cmd": "PYTHONPATH=src python -m pytest tests/pyutils/test_suggestion_list.py -q",
+      "bench_cmd": "python osspr-intake/harness/measure/bench.py",
+      "baseline_median_ms": 30.21,
+      "baseline_noise_pct": 0.39,
+      "tests_pass_on_baseline": true,
+      "notes": "Validation suggestions for an unknown field or type run this pure-Python Damerau-Levenshtein loop once per candidate name. Each call lowercases the option, allocates a code-point list, and updates three matrix rows in Python. On the GitHub schema that scan is the bulk of the cost of suggesting fields for typos."
+    },
+    {
+      "upstream_repo": "graphql-python/graphql-core",
+      "head_sha": "1d505c19bf5fb8da0205165b78af6094d637009e",
+      "file": "src/graphql/execution/collect_fields.py",
+      "function": "visit_selection_sets",
+      "native_test_cmd": "PYTHONPATH=src python -m pytest tests/execution/test_collect_fields.py -q",
+      "bench_cmd": "python osspr-intake/harness/visit_selection_sets/bench.py",
+      "baseline_median_ms": 47.902,
+      "baseline_noise_pct": 2.01,
+      "tests_pass_on_baseline": true,
+      "notes": "Every execution collects selected fields here before resolvers run. The loop isinstance-checks each selection, scans @skip and @include even for fields with no directives, and allocates a FieldDetails tuple per field. About half of the time of a wide selection set is in this function itself, and the calls it makes are decided here."
+    },
+    {
+      "upstream_repo": "graphql-python/graphql-core",
+      "head_sha": "1d505c19bf5fb8da0205165b78af6094d637009e",
+      "file": "src/graphql/pyutils/natural_compare.py",
+      "function": "natural_comparison_key",
+      "native_test_cmd": "PYTHONPATH=src python -m pytest tests/pyutils/test_natural_compare.py -q",
+      "bench_cmd": "python osspr-intake/harness/natural_comparison_key/bench.py",
+      "baseline_median_ms": 82.212,
+      "baseline_noise_pct": 0.81,
+      "tests_pass_on_baseline": true,
+      "notes": "Lexicographic schema sorts and suggestion ordering build a key for every type and field name. The helper splits each name with a digit regex, then boxes every piece in a tuple via itertools.cycle. A direct scan of the name would avoid both the regex and the per-name tuple."
+    },
+    {
+      "upstream_repo": "graphql-python/graphql-core",
+      "head_sha": "1d505c19bf5fb8da0205165b78af6094d637009e",
+      "file": "src/graphql/language/block_string.py",
+      "function": "is_printable_as_block_string",
+      "native_test_cmd": "PYTHONPATH=src python -m pytest tests/language/test_block_string.py -q",
+      "bench_cmd": "python osspr-intake/harness/is_printable_as_block_string/bench.py",
+      "baseline_median_ms": 17.284,
+      "baseline_noise_pct": 1.41,
+      "tests_pass_on_baseline": true,
+      "notes": "print_schema calls this for every description to decide whether to use a block string. The body walks the description one code point at a time in Python. On the GitHub schema that scan is the largest self-time cost inside schema printing."
+    }
+  ]
+}
