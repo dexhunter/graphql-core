@@ -48,14 +48,12 @@ class LexicalDistance:
 
     _input: str
     _input_lower_case: str
-    _input_list: list[int]
     _rows: list[list[int]]
 
     def __init__(self, input_: str) -> None:
         self._input = input_
         self._input_lower_case = input_.lower()
         row_size = len(input_) + 1
-        self._input_list = list(map(ord, self._input_lower_case))
 
         self._rows = [[0] * row_size, [0] * row_size, [0] * row_size]
 
@@ -69,7 +67,7 @@ class LexicalDistance:
         if self._input_lower_case == option_lower_case:
             return 1
 
-        a, b = list(map(ord, option_lower_case)), self._input_list
+        a, b = option_lower_case, self._input_lower_case
         a_len, b_len = len(a), len(b)
         if a_len < b_len:
             a, b = b, a
@@ -82,33 +80,49 @@ class LexicalDistance:
         for j in range(b_len + 1):
             rows[0][j] = j
 
-        for i in range(1, a_len + 1):
-            up_row = rows[(i - 1) % 3]
-            current_row = rows[i % 3]
+        # Common suffix and prefix characters need no edits
+        while b_len and a[a_len - 1] == b[b_len - 1]:
+            a_len -= 1
+            b_len -= 1
+        start = 0
+        while start < b_len and a[start] == b[start]:
+            start += 1
+        a, b = a[start:a_len], b[start:b_len]
+        a_len -= start
+        b_len -= start
 
-            smallest_cell = current_row[0] = i
-            for j in range(1, b_len + 1):
-                cost = 0 if a[i - 1] == b[j - 1] else 1
+        # Each character of a missing from b needs at least one edit
+        if len(set(a).difference(b)) > threshold:
+            return None
 
-                current_cell = min(
-                    up_row[j] + 1,  # delete
-                    current_row[j - 1] + 1,  # insert
-                    up_row[j - 1] + cost,  # substitute
-                )
+        up_row, current_row, double_up_row = rows
+        prev_a_char = None
+        for i, a_char in enumerate(a, 1):
+            left_cell = current_row[0] = i
+            diagonal_cell = up_row[0]
+            prev_b_char = None
+            for j, b_char in enumerate(b, 1):
+                up_cell = up_row[j]
+                if a_char == b_char:
+                    # Equal characters never cost more than the diagonal
+                    current_cell = diagonal_cell
+                else:
+                    current_cell = min(up_cell, left_cell, diagonal_cell) + 1
+                    if a_char == prev_b_char and prev_a_char == b_char:
+                        # transposition
+                        current_cell = min(current_cell, double_up_row[j - 2] + 1)
 
-                if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
-                    # transposition
-                    double_diagonal_cell = rows[(i - 2) % 3][j - 2]
-                    current_cell = min(current_cell, double_diagonal_cell + 1)
-
-                smallest_cell = min(current_cell, smallest_cell)
-
-                current_row[j] = current_cell
+                current_row[j] = left_cell = current_cell
+                diagonal_cell = up_cell
+                prev_b_char = b_char
 
             # Early exit, since distance can't go smaller than smallest element
             # of the previous row.
-            if smallest_cell > threshold:
+            if i > threshold and min(current_row[: b_len + 1]) > threshold:
                 return None
 
-        distance = rows[a_len % 3][b_len]
+            prev_a_char = a_char
+            double_up_row, up_row, current_row = up_row, current_row, double_up_row
+
+        distance = up_row[b_len]
         return distance if distance <= threshold else None
