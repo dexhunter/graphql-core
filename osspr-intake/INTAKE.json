@@ -1,0 +1,64 @@
+{
+  "targets": [
+    {
+      "upstream_repo": "https://github.com/graphql-python/graphql-core",
+      "head_sha": "1d505c19bf5fb8da0205165b78af6094d637009e",
+      "file": "src/graphql/language/visitor.py",
+      "function": "visit",
+      "native_test_cmd": "PYTHONPATH=src python3 -m pytest tests/language/test_visitor.py -q",
+      "tests_pass_on_baseline": true,
+      "metric_kind": "allocations",
+      "baseline_value": 23749,
+      "baseline_noise_pct": 0.0,
+      "metric_benchmark": "python3 osspr-intake/harness/visit_allocs.py",
+      "labeled_data": null,
+      "why_hot": "A read-only walk of a 12,000-field operation allocates 23,749 object blocks and returns the original document. visit still builds a fresh 5-tuple, (in_array, idx, keys, edits, stack), for every AST node when the visitor has no enter or leave method and edits stays None. Reusing one frame buffer would keep that document identity and the same enter/leave order while dropping those tuples.",
+      "overlap_check": "Open upstream PRs checked: #316 (visit_selection_sets, should_include_node, get_defer_usage), #313 (is_printable_as_block_string), #311 (natural_comparison_key), #309 (is_awaitable), #307 (Lexer.__init__, Lexer.create_token, Lexer.read_name), #305 (assert_name), #303 (coerce_input_literal), #165 (historical execute.py list/async wrappers, execute_sync, default_type_resolver), #155 (lazy execute.py). None modify visitor.py or visit. The 2026-11-07 intake cards are runtime timings for other functions, not allocations for visit. Fork branch perf/visitor-stack is not an open upstream PR."
+    },
+    {
+      "upstream_repo": "https://github.com/graphql-python/graphql-core",
+      "head_sha": "1d505c19bf5fb8da0205165b78af6094d637009e",
+      "file": "src/graphql/language/lexer.py",
+      "function": "Lexer.read_block_string",
+      "native_test_cmd": "PYTHONPATH=src python3 -m pytest tests/language/test_lexer.py -q",
+      "tests_pass_on_baseline": true,
+      "metric_kind": "peak_memory_bytes",
+      "baseline_value": 493112,
+      "baseline_noise_pct": 0.0,
+      "metric_benchmark": "python3 osspr-intake/harness/read_block_string_peak.py",
+      "labeled_data": null,
+      "why_hot": "Lexing a 2,500-line indented block string peaks at 493,112 traced bytes, several times the dedented token value. The scanner grows each raw line with +=, dedent_block_string_lines slices every indented line into a second string, and join builds the token while both copies are live. The token value is the spec BlockStringValue. One dedenting buffer would keep that string and lower the peak.",
+      "overlap_check": "Open PR #307 modifies Lexer.__init__, Lexer.create_token, and Lexer.read_name. It does not modify read_block_string. Open PR #313 modifies only is_printable_as_block_string; dedent_block_string_lines is called here and is not part of that diff. No 2026-11-07 intake card covers read_block_string or peak_memory_bytes."
+    },
+    {
+      "upstream_repo": "https://github.com/graphql-python/graphql-core",
+      "head_sha": "1d505c19bf5fb8da0205165b78af6094d637009e",
+      "file": "src/graphql/execution/values.py",
+      "function": "input_is_nested_too_deeply",
+      "native_test_cmd": "PYTHONPATH=src python3 -m pytest tests/execution/test_variables.py -q",
+      "tests_pass_on_baseline": true,
+      "metric_kind": "peak_memory_bytes",
+      "baseline_value": 3516880,
+      "baseline_noise_pct": 0.0,
+      "metric_benchmark": "python3 osspr-intake/harness/nested_input_peak.py",
+      "labeled_data": null,
+      "why_hot": "A flat list of 50,000 ints under [Int] returns False and peaks at 3,516,880 traced bytes. Before any element is popped, the depth check extends its stack with one (value, type, depth) tuple per element, so the whole width is live at once. The only observable result is that bool. An index walk would return the same bool without the tuple stack.",
+      "overlap_check": "No open upstream PR modifies src/graphql/execution/values.py. #303 modifies coerce_input_literal only; this depth check does not call it. #165 and #155 modify execute.py, not variable-value nesting. No existing intake card covers input_is_nested_too_deeply."
+    },
+    {
+      "upstream_repo": "https://github.com/graphql-python/graphql-core",
+      "head_sha": "1d505c19bf5fb8da0205165b78af6094d637009e",
+      "file": "src/graphql/execution/executor.py",
+      "function": "Executor.complete_iterable_value",
+      "native_test_cmd": "PYTHONPATH=src python3 -m pytest tests/execution/test_lists.py -q",
+      "tests_pass_on_baseline": true,
+      "metric_kind": "allocations",
+      "baseline_value": 41760,
+      "baseline_noise_pct": 0.0,
+      "metric_benchmark": "python3 osspr-intake/harness/complete_iterable_allocs.py",
+      "labeled_data": null,
+      "why_hot": "Completing a sync list of 6,000 ints allocates 41,760 object blocks, about 7 per item, and the response list equals the input. Each item builds a Path via add_key (about 2 of those blocks, including the index integer) and then calls complete_list_item_value, complete_value, and complete_leaf_value. The returned ints do not depend on those Path objects. Completing successful leaf items without a per-item Path would keep the list and the error paths for items that fail.",
+      "overlap_check": "No open upstream PR modifies src/graphql/execution/executor.py. #165 and #155 patch the pre-split execute.py (including historical list-await wrappers) and do not touch Executor.complete_iterable_value. #309 modifies is_awaitable, which this method calls, but a loop of is_awaitable on ints adds no allocator calls beyond the index integers. #316 modifies visit_selection_sets, not list completion. Fork branch perf/async-iterator-list-completion is not an open upstream PR. No existing intake card covers this function or allocations."
+    }
+  ]
+}
